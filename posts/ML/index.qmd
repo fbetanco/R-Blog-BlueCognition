@@ -75,7 +75,7 @@ tidymodels:: tidymodels_prefer(quiet = TRUE)
 
 # Loading the data.
 
-spotify <- read.csv("data/spotify-2023.csv")
+spotify <- read.csv("C:/Users/fbeta/OneDrive/Blue Cognition/Blog/R-Blog-BlueCognition/data/spotify-2023.csv")
 
 ```
 
