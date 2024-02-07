@@ -1,0 +1,941 @@
+---
+title: "Spotify Songs Streaming Prediction"
+author: "Felix Betancourt"
+date: "2/1/2024"
+categories: [spotify, machine learning, regression, classification]
+---
+
+![](spotify.jpg)
+
+
+# Section 1 - Motivation
+
+As an avid music listener in general, I have always been curious about the impact of streaming platforms on the music industry in terms of how it has been changing the way people consume, distribute, and monetize music.
+
+The shift from ownership to access has led to a more consumption-based model, democratized access to music, and enhanced music discoverability. Streaming platforms typically pay artists and rights holders based on the number of streams their songs accumulate.
+
+In this context, one of the most important impacts of the streaming platform is on the revenue streams, which have been transformed significantly: **the number of streams is becoming the dominant source of income for many artists.**
+
+Streaming platforms generate vast amounts of data on listener behavior, preferences, and trends. This data has become invaluable for artists, labels, and streaming services in understanding audience demographics, optimizing marketing strategies, and identifying opportunities for promotion and monetization.
+
+So, predicting total streams allows stakeholders to forecast. The ability to predict the total number of streams a song can get is crucial for several reasons:
+
+1.  First, it helps forecast potential revenue streams from a particular track, which is particularly important for budgeting, planning promotional activities, and making financial decisions.
+
+2.  The total number of streams is a critical metric for evaluating the performance and popularity of a song. By predicting future streams, artists, record labels, and streaming platforms can assess the success of a release and compare it to past performances.
+
+    This information is essential for understanding audience preferences and adjusting strategies accordingly.
+
+3.  Predicting total streams enables targeted marketing and promotional efforts, as it helps identify songs likely to garner high stream counts.
+
+4.  Finally, streaming platforms often curate playlists based on predicted popularity and user preferences. Predicting total streams helps platforms identify which songs will likely resonate with their users/audience, leading to better playlist curation therefore increased user engagement.
+
+Overall, the ability to predict total streams for a song provides valuable insights for various stakeholders in the music industry, helping them make informed decisions and optimize their strategies for successful potential revenue streams from a particular track.
+
+The amount of data sourced by user behaviors and features of the songs, all captured by streaming platforms, is very rich. These data make it feasible to predict the volume of streams through algorithms that will help improve engagement, resulting in maximization of consumption and revenue.
+
+In all this context, I will use a dataset available in [Kaggle (Spotify 2023 data)](https://www.kaggle.com/datasets/nelgiriyewithana/top-spotify-songs-2023) that contains real data about streaming volumes in Spotify and many features of the songs. I'll use this dataset to create a model that best predict the number of streams for the songs.
+
+::: callout-tip
+### The author describes the dataset as follows:
+
+*"This dataset contains a comprehensive list of the most famous songs of 2023 as listed on Spotify. The dataset offers a wealth of features beyond what is typically available in similar datasets. It provides insights into each song's attributes, popularity, and presence on various music platforms. The dataset includes information such as track name, artist(s) name, release date, Spotify playlists and charts, streaming statistics, Apple Music presence, Deezer presence, Shazam charts, and various audio features."*
+:::
+
+# Section 2 - Exploratory Data Analysis
+
+First I'll load packages and read and create the dataset object:
+
+```{r setup, echo = TRUE, warning = FALSE, message = FALSE}
+
+# Loading packages
+suppressPackageStartupMessages(library(tidyverse, warn.conflicts = FALSE))
+suppressWarnings(library(dplyr, warn.conflicts = FALSE))
+suppressWarnings(library(data.table, warn.conflicts = FALSE))
+suppressWarnings(library(Metrics))
+suppressWarnings(library(scales, warn.conflicts = FALSE))
+suppressWarnings(library(formattable, warn.conflicts = FALSE))
+suppressWarnings(library(kableExtra, warn.conflicts = FALSE))
+suppressWarnings(library(ggplot2, warn.conflicts = FALSE))
+suppressWarnings(library(psych, warn.conflicts = FALSE))
+suppressWarnings(library(summarytools, warn.conflicts = FALSE))
+suppressWarnings(library(caret, warn.conflicts = FALSE))
+suppressWarnings(library(corrplot, warn.conflicts = FALSE))
+suppressWarnings(library(ggpubr, warn.conflicts = FALSE))
+suppressWarnings(library(tinytex, warn.conflicts = FALSE))
+suppressWarnings(library(tidymodels, warn.conflicts = FALSE))
+suppressWarnings(library(glmnet,  warn.conflicts = FALSE))
+suppressWarnings(library(randomForest, warn.conflicts = FALSE))
+suppressWarnings(library(e1071, warn.conflicts = FALSE))
+suppressWarnings(library(ranger, warn.conflicts = FALSE))
+
+conflicted::conflicts_prefer(yardstick::accuracy)
+conflicted::conflicts_prefer(Metrics::mae)
+tidymodels:: tidymodels_prefer(quiet = TRUE) 
+
+# Loading the data.
+
+spotify <- read.csv("data/spotify-2023.csv")
+
+```
+
+## Section 2.1 - Data Cleaning
+
+Let's see what is in the dataset train file and do some data wrangling as needed and avoiding data leakage.
+
+First, I found that the author of the data describe the deifnition of each feature in the dataset:
+
+track_name: Name of the song artist(s)
+
+name: Name of the artist(s) of the song
+
+artist_count: Number of artists contributing to the song
+
+released_year: Year when the song was released
+
+released_month: Month when the song was released
+
+released_day: Day of the month when the song was released
+
+in_spotify_playlists: Number of Spotify playlists the song is included in
+
+in_spotify_charts: Presence and rank of the song on Spotify charts
+
+streams: Total number of streams on Spotify
+
+in_apple_playlists: Number of Apple Music playlists the song is included
+
+in in_apple_charts: Presence and rank of the song on Apple Music charts
+
+in_deezer_playlists: Number of Deezer playlists the song is included in
+
+in_deezer_charts: Presence and rank of the song on Deezer charts
+
+in_shazam_charts: Presence and rank of the song on Shazam charts
+
+bpm: Beats per minute, a measure of song tempo
+
+key: Key of the song
+
+mode: Mode of the song (major or minor)
+
+danceability\_%: Percentage indicating how suitable the song is for dancing
+
+valence\_%: Positivity of the song's musical content
+
+energy\_%: Perceived energy level of the song
+
+acousticness\_%: Amount of acoustic sound in the song
+
+instrumentalness\_%: Amount of instrumental content in the song
+
+liveness\_%: Presence of live performance elements
+
+speechiness\_%: Amount of spoken words in the song
+
+```{r}
+#Structure and summary of the data
+
+str(spotify)
+summary(spotify)
+
+
+```
+
+I will make some obvious adjustments to certain variables, for example the number of "streams" have to be numeric, for some reason it is set as character. Also I'll fix some features names in the dataset.
+
+```{r}
+
+# Mutating to numeric variables that should be numeric (streams
+
+spotify$streams <- as.numeric(spotify$streams)
+spotify$in_deezer_playlists <- as.numeric(spotify$in_deezer_playlists)
+spotify$in_shazam_charts <- as.numeric(spotify$in_shazam_charts)
+
+#I'll remove special characters from Artist name and track name. 
+
+spotify <- spotify %>% mutate(artist.s._name = str_remove_all(artist.s._name, "[^[:alnum:]]"))
+spotify <- spotify %>% mutate(track_name = str_remove_all(track_name, "[^[:alnum:]]"))
+
+# Now I'll create an ID column by merging these 2 columns
+
+spotify$id <- paste(spotify$track_name, spotify$artist.s._name)
+
+#Eliminating spaces
+
+spotify <- spotify %>% mutate(id = str_remove_all(id, "[^[:alnum:]]"))
+
+#Renaming some features names to facilitate the coding later
+
+spotify <- rename(spotify, artist.name = artist.s._name, number.art.song = artist_count, danceability = danceability_., valence = valence_., energy = energy_., acousticness = acousticness_., instrumentalness = instrumentalness_., liveness = liveness_., speechiness = speechiness_.)
+
+
+#Let's check how the df looks now
+dim(spotify)
+summary(spotify)
+
+```
+
+## Section 2.2 - Numerical and Visual Summary
+
+Let's split the dataset, explore more the data to do some wrangling and visualize some key variables in the dataset.
+
+```{r}
+
+# splitting dataset to have classifications to test. I will randomly split the dataset into 80% for training and 20% for testing
+set.seed(197)
+ran <- sample(1:nrow(spotify), 0.8 * nrow(spotify)) 
+
+
+# Split the data into training and testing sets
+train <- spotify[ran,]
+test <- spotify[-ran,]
+
+
+```
+
+Checking the dimensions of the new datasets
+
+```{r}
+dim(train)
+dim(test)
+
+```
+
+Training set has 762 rows/observations and 38 features or variables, while the test set contain 191 observations and the same 38 variables.
+
+I'll do some data wrangling for the train set
+
+```{r}
+
+# Let's review the character variables and create dummies that can be use later when building the models
+
+unique(train$key)
+unique(train$mode)
+
+# Exploring the frequency of the values in the key
+
+key.table<-table(train$key)
+key.table
+
+#replacing blank cells with NA
+
+train$key <- na_if(train$key, '')
+
+#replacing NA with the most frequent value in the feature, in this case C#
+
+train <- train %>% 
+  mutate(key = ifelse(is.na(key), "C#", key))
+
+#I'll create dummy for key and mode 
+
+train <- train %>% 
+  mutate(mode.n = case_when(
+        mode == "Major" ~ 1,
+        mode == "Minor" ~ 0,
+        ))%>%
+  mutate(key.A = case_when(
+        key == "A" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.B = case_when(
+        key == "B" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.D = case_when(
+        key == "D" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.E = case_when(
+        key == "E" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.F = case_when(
+        key == "F" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.G = case_when(
+        key == "G" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.CS = case_when(
+        key == "C#" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.FS = case_when(
+        key == "F#" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.GS = case_when(
+        key == "G#" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.AS = case_when(
+        key == "A#" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.DS = case_when(
+        key == "D#" ~ 1,
+        TRUE ~ 0))
+
+#Lastly I'll replace the some NAs using median. For in_deezer_playlists, in_shazam_charts and stream
+
+median.stream.t <- median(train$streams, na.rm = TRUE)
+median.deezer.playlist.t <- median(train$in_deezer_playlists, na.rm = TRUE)
+median.shazam.chart.t <- median(train$in_shazam_charts, na.rm = TRUE)
+
+train <- train %>% mutate(streams = ifelse(is.na(streams), median.stream.t, streams)) %>%
+                   mutate(in_deezer_playlists = ifelse(is.na(in_deezer_playlists), median.deezer.playlist.t, in_deezer_playlists)) %>%
+                   mutate(in_shazam_charts = ifelse(is.na(in_shazam_charts), median.shazam.chart.t, in_shazam_charts))
+
+summary(train)
+dim(train)
+
+```
+
+Now let's explore the training dataset with focus on Streams which is the target variable
+
+```{r}
+
+#Let's see a summary of the target variable (number of streams)
+
+summary.stream <- descr(train$streams)
+print(summary.stream)
+
+```
+
+Given the difference between Mean and Median (\~2x) and curtosis value (\>0 - 4.12), it sounds like a distribution far to a normal distribution with high probability of extreme values.
+
+Let's visualize the distribution. I'll use a density plot.
+
+```{r}
+
+# Density estimation
+density_streams <- density(train$streams)
+density_spot_play <- density(train$in_spotify_playlists)
+density_app_play <- density(train$in_apple_playlists)
+density_dee_play <- density(train$in_deezer_playlists)
+density_acc <- density(train$acousticness)
+
+# Plot the density curve
+plot(density_streams, type = "l", main = "Density Plot for Streams", xlab = "Values", ylab = "Density")
+plot(density_spot_play, type = "l", main = "Density Plot for In Spotify Playlist", xlab = "Values", ylab = "Density")
+plot(density_app_play, type = "l", main = "Density Plot for In Apple Playlist", xlab = "Values", ylab = "Density")
+plot(density_dee_play, type = "l", main = "Density Plot for In Deezer Playlist", xlab = "Values", ylab = "Density")
+plot(density_acc, type = "l", main = "Density Plot for Acousticness", xlab = "Values", ylab = "Density")
+
+
+```
+
+Certainly the distribution seems with a very heavy tail towards the higher values. Also looking at some key variables
+
+It seems that just a few artist has a very high volume of streams represented by extreme values.
+
+Just curious about the streams by artist:
+
+```{r}
+
+#Let's create a table summarizing streams by artist
+
+dt.train <- data.table(train)
+dt.train2 <- dt.train[,list(Total.streams = sum(streams, na.rm=T), freq = .N), by = c("artist.name")]
+
+Stream_table <- dt.train2 %>% 
+  group_by(artist.name) %>%
+  summarise(Total.streams = sum(Total.streams, na.rm=TRUE), Streams.Median = median(Total.streams, na.rm=TRUE))
+Stream_table <- Stream_table %>%
+  mutate(Total.Streams.Percent = Total.streams/(sum(Total.streams))*100.2)
+Stream_table <- Stream_table[with (Stream_table, order(-Total.Streams.Percent)),]
+
+Stream_table <- Stream_table%>%
+  mutate(Cum_Percent = cumsum(Total.Streams.Percent))
+
+data_subset <- slice(Stream_table, 1:30)
+
+# Print the subset of the data as a nice table using kable
+kable(data_subset)
+
+```
+
+It is interesting to see that almost 10% of total streams are concentrated in 4 artist: Ed Sheeran, Tylor Swift, Harry Styles and The Weeknd. And 30% of all streams comes from 26 artists.
+
+It is important to mention that here "artist" means unique artist or combination of artists per song, for example, if Taylor Swift has a song along with Ed Sheeran, then it will be considered a unique artist in the analysis.
+
+```{r}
+
+#how many unique artist are here
+n_distinct(train$artist.name)
+
+```
+
+We have 536 "unique" artist, so following previous observation we can say that 5% of the artist (26 artists) concentrate 30% of all streams.
+
+Something that I think would be interesting is segmenting the data set in Deciles to create categories of artist from the highest to lowest streamer.
+
+Then we can use those categories as a classification target.
+
+```{r}
+
+#Let's create the Decile variable based on the streams to use it later in classification method
+
+train <- train %>% mutate(class.decile = ntile(streams, 10))
+
+```
+
+Now let's explore a few other features vs streams
+
+```{r fig.width = 15, fig.height=15}
+#Box plot for Strems and Mode, Key and Number of Artists in the song
+
+box1 <- ggplot(train, aes(x =mode, y = streams))+
+  geom_boxplot(alpha=0.7, outlier.shape = NA)+
+  facet_wrap(.~number.art.song, scales = "free")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(legend.position = "right") +
+  coord_cartesian(ylim =  c(1e+7, 1e+9))+
+  labs(title="Streams vs Mode",
+       subtitle = "Grouped by Number of Artist in the Song",
+        x ="Mode", y = "Streams")
+box1
+
+box2 <- ggplot(train, aes(x =key, y = streams))+
+  geom_boxplot(alpha=0.7, outlier.shape = NA)+
+  facet_wrap(.~number.art.song, scales = "free")+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme(legend.position = "right") +
+  coord_cartesian(ylim =  c(1e+7, 1.5e+9))+
+  labs(title="Streams vs Key",
+       subtitle = "Grouped by Number of Artist in the Song",
+        x ="Key", y = "Streams")
+box2
+```
+
+It is interesting to see that there is not too much variability when comparing streams by Mode and Number of Artist in the song, but when comparing among Keys seems that the variability increases when the song has 2 or 3 artists involved.
+
+Let's now look at numerical variables using correlation matrix and scatter plot.
+
+```{r}
+
+#I'll create a dataset with only numeric variables, also I will exclude from here class.decile because is redundnat with streams
+
+train.n <- train %>% select(-track_name, -artist.name, -key, -mode, -id, -class.decile)
+
+# Cor Matrix
+cor_matrix1 <- cor(train.n)
+cor_matrix1 <- round(cor_matrix1, 2)
+
+# Let's see a color matrix to simplify visualization
+
+corrplot(cor_matrix1, method = "circle", tl.cex = 0.5)
+
+
+```
+
+I can see that there is correlation among presence in charts and playlists among the different platforms, in particular seems there is a strong correlation between Spotify and Apple Music playlists and among the charts in all platforms. Here could be some milticolinearity that I may need to pay attention.
+
+On the other hand there seems also some multicolinearity among song characteristics (danceability, energy, valence, acousticness, instrumentalness, liveness, speachness), but none of them seems highly correlated to streams. Also noted strong inverse correlation between acousticness and energy).
+
+Lastly, seems that number of streams is highly and positive correlated to the number of playlists the song is included in any of the platforms (spotify, apple and deezer).
+
+Let's visualize Streams and playlists in scatter plots
+
+```{r}
+
+scatter1 <- ggplot(train, aes(in_deezer_playlists,streams))+
+  geom_point()+
+  scale_y_continuous(limits=c(1e+8,1.5e+9))+
+  labs(title="Scatter Plot - Streams vs Deezer playlist precense",
+        x ="In Deezer Playlist", y = "Streams")
+scatter1
+
+scatter2 <- ggplot(train, aes(in_apple_playlists,streams))+
+  geom_point()+
+  scale_y_continuous(limits=c(1e+8,1.5e+9))+
+  labs(title="Scatter Plot - Streams vs Apple playlist precense",
+        x ="In Apple Music Playlist", y = "Streams")
+scatter2
+
+scatter3 <- ggplot(train, aes(in_spotify_playlists,streams))+
+  geom_point()+
+  scale_y_continuous(limits=c(1e+8,1.5e+9))+
+  labs(title="Scatter Plot - Streams vs Spotify playlist precense",
+        x ="In Spotify Playlist", y = "Streams")
+scatter3
+
+```
+
+# Section 3 - Evaluation Metric
+
+I'll focus on Regression method for modeling. I have 32 features in my training set including the numerical variables only, and since it can't be considered a large number of features so I'll pass on any shrinking method this time (like PCA).
+
+Given the distribution of the target variable (streams) is very skewed and I won't transform the variable (i.e log), I rather use a metric less sensitive to outliners. So I'll use **Median Absolute Error** (mdae in R).
+
+# Section 4 - Fit models
+
+I'll use linear regression, lasso regression and random forest
+
+## Section 4.1 - Data preprocessing
+
+### Method 1 - Linear Regression
+
+```{r}
+#Linear regression with all features
+model1 <- lm(streams ~ ., data = train.n)
+summary(model1)
+
+```
+
+Out of the 31 features only 10 show a significant relationship with the number of streams, most of them around presence in playlists or charts in the different platforms, only one is related to the music compositions (acousticness).
+
+I'll try other liner models:
+
+```{r}
+
+#I'll log the target to see if the prediction improves
+model2 <- lm(log(streams) ~ number.art.song + released_year + released_day + in_spotify_playlists + in_spotify_charts + in_apple_playlists + in_deezer_playlists + in_deezer_charts + in_shazam_charts + acousticness, data = train.n)
+summary(model2)
+
+```
+
+Actually the model deteriorates significantly when logging streams variable (Adjusted R2=.5 vs .73 with model 1).
+
+A third model keeping only significant features founded in model 1:
+
+```{r}
+
+#Let's keep only the significant features
+
+model3 <- lm(streams ~ number.art.song + released_year + released_day + in_spotify_playlists + in_spotify_charts + in_apple_playlists + in_deezer_playlists + in_deezer_charts + in_shazam_charts + acousticness, data = train.n)
+summary(model3)
+
+```
+
+The power of explanation when pulling out non-relevant features (based on the statistical significance) practically does not change.
+
+```{r}
+
+# Make predictions for new data
+predicted_1 <- predict(model1, train.n)
+predicted_2 <- predict(model2, train.n)
+predicted_3 <- predict(model3, train.n)
+
+#MdAE      
+
+mdae_lm1 <- mdae(train.n$streams, predicted_1)
+mdae_lm2 <- mdae(train.n$streams, predicted_2)
+mdae_lm3 <- mdae(train.n$streams, predicted_3)
+
+print(mdae_lm1)
+print(mdae_lm2)
+print(mdae_lm3)
+
+
+
+```
+
+Seems that model 3 is the best option based on the Median Absolute Error value (lowest error). Logging streams makes the model worst, and interesting to see that model 1 which includes all variables and has the highest R2 has a higher error than model 3 which includes only the most relevant features based on the p value significance.
+
+### Method 2 - Lasso Regression
+
+Lasso is particularly useful in situations where feature selection is desired or when the dataset contains many irrelevant or redundant predictors, which seems this case. Also select the most relevant features and reduce coefficient of irrelevant features, which at the same time allows to handle multicollinearity among predictor variables which also seems appropriate given the strong correlation among playlist and chart variables.
+
+```{r}
+summary(train.n)
+#this time I'll separate target variable on a different object because I feel will be easier to handle
+
+stream.train <- train.n$streams
+
+#Now will exclude streams from the dataset and predicted values from linear regression
+
+train.n2 <- train.n %>% select(-streams)
+
+#I'll scale train features
+
+xtrain.n2.scaled <- scale(train.n2)
+
+#I'll scale also streams just to used in the cross validation. I rather use scaling as it keeps the distribution
+
+y.train.n2.scaled <- scale(stream.train)
+
+#I'll create the lambda sequence value 
+
+lambda.array <- seq(from=0.1, to= 100, by=0.1)
+
+#Cross validation using cv.glmnet
+
+cv.lasso.model <- cv.glmnet(xtrain.n2.scaled, y.train.n2.scaled, alpha=1, lambda=lambda.array)
+
+plot(cv.lasso.model, xvar = 'lambda')
+
+#getting the best lambda
+
+best.lasso.lambda <- cv.lasso.model$lambda.min
+best.lasso.lambda
+
+#MSE
+mean.lasso.error <- mean(cv.lasso.model$cvm)
+print(mean.lasso.error)
+print(coef(cv.lasso.model))
+
+
+```
+
+Interesting to see that Lasso model keeps the presence of the song in playlist on the 3 main streaming platforms.
+
+### Method 3 - Random Forest
+
+Lastly, I'll use random forest and this time I'll use the class.deciles created previously to use it as classification.
+
+```{r}
+
+#First I'll bring back as a separate object the class.deciles variable
+
+train.n2$class.decile <- train$class.decile
+train.n2$class.decile <- as.factor(train.n2$class.decile)
+
+```
+
+Tune the hyperparameters:
+
+```{r}
+tune_spec <- rand_forest(trees = tune(), mtry = tune()) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+#starting with this values
+
+rf_grid <- grid_regular(
+  trees(range = c(100, 800)),
+  mtry(range = c(2, 31)),
+  levels = 5)
+
+set.seed(1977)
+folds <- vfold_cv(train.n2, v = 5)
+
+rf_wf <- workflow() %>%
+  add_model(tune_spec) %>%
+  add_formula(class.decile ~ .)
+
+#For the purpose to train the model I'll use F1 as metric, despite I'll use mdae for measuring performance later
+
+my_metrics <- metric_set(f_meas)
+
+rf_res <- 
+  rf_wf %>% 
+  tune_grid(resamples = folds, grid = rf_grid, metrics = my_metrics)
+
+```
+
+Visualize the results and best parameters:
+
+```{r}
+
+rf_res %>%
+  collect_metrics() %>%
+  filter(.metric == "f_meas") %>%
+  select(mtry, trees, mean) %>%
+  ggplot(aes(mtry, trees, fill = mean)) +
+    geom_tile() 
+```
+
+Best Parameters:
+
+```{r}
+best_params <- rf_res %>%
+  select_best("f_meas")
+
+best_params
+  
+```
+
+Explore a different region
+
+```{r}
+
+#Now with this values
+
+rf_grid2 <- grid_regular(
+  trees(range = c(100, 500)),
+  mtry(range = c(10, 31)),
+  levels = 5)
+
+set.seed(1979)
+folds2 <- vfold_cv(train.n2, v = 10)
+
+rf_res2 <- 
+  rf_wf %>% 
+  tune_grid(resamples = folds2, grid = rf_grid2, metrics = my_metrics)
+
+rf_res2 %>%
+  collect_metrics() %>%
+  filter(.metric == "f_meas") %>%
+  select(mtry, trees, mean) %>%
+  ggplot(aes(mtry, trees, fill = mean)) +
+    geom_tile() 
+
+best_params2 <- rf_res2 %>%
+  select_best("f_meas")
+
+best_params2
+
+```
+
+## Section 4.2 - Choose hyperparameters; fit and test models
+
+First I'll make adjustments as training set, to the test set.
+
+```{r}
+
+summary(test)
+
+# Let's review the character variables and create dummies that can be use later when building the models
+
+unique(test$key)
+
+unique(test$mode)
+
+# Exploring the frequency of the values in the key
+
+key.table<-table(test$key)
+key.table
+
+#replacing blank cells with NA
+
+test$key <- na_if(test$key, '')
+
+#replacing NA with the most frequent value in the feature, in this case C#
+
+test <- test %>% 
+  mutate(key = ifelse(is.na(key), "C#", key))
+
+#I'll create dummy for key and mode 
+
+test <- test %>% 
+  mutate(mode.n = case_when(
+        mode == "Major" ~ 1,
+        mode == "Minor" ~ 0,
+        ))%>%
+  mutate(key.A = case_when(
+        key == "A" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.B = case_when(
+        key == "B" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.D = case_when(
+        key == "D" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.E = case_when(
+        key == "E" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.F = case_when(
+        key == "F" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.G = case_when(
+        key == "G" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.CS = case_when(
+        key == "C#" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.FS = case_when(
+        key == "F#" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.GS = case_when(
+        key == "G#" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.AS = case_when(
+        key == "A#" ~ 1,
+        TRUE ~ 0))%>%
+  mutate(key.DS = case_when(
+        key == "D#" ~ 1,
+        TRUE ~ 0))
+
+#Lastly I'll replace the some NAs using median. For in_deezer_playlists, in_shazam_charts and stream
+
+median.deezer.playlist.ts <- median(test$in_deezer_playlists, na.rm = TRUE)
+median.shazam.chart.ts <- median(test$in_shazam_charts, na.rm = TRUE)
+
+test <- test %>% 
+  mutate(in_deezer_playlists = ifelse(is.na(in_deezer_playlists), median.deezer.playlist.t, in_deezer_playlists)) %>%
+  mutate(in_shazam_charts = ifelse(is.na(in_shazam_charts), median.shazam.chart.t, in_shazam_charts))
+
+#Let's create the Decile variable based on the streams to use it later in classification method
+
+test <- test %>% mutate(class.decile = ntile(streams, 10))
+
+#now the dataset for testing, removing non-numeric or irrelevant variables
+
+test.n <- test %>% select(-track_name, -artist.name, -key, -mode, -id, -class.decile)
+
+#extracting test actual streams 
+
+stream.test <- test.n$streams
+
+```
+
+### Linear regression fitting and testing
+
+```{r}
+
+# Make predictions for new data
+lm.predicted.1 <- predict(model1, test.n)
+lm.predicted.3 <- predict(model3, test.n)
+
+#Checking MdAE
+mdae_lm1.final <- mdae(stream.test, lm.predicted.1)
+print(mdae_lm1.final)
+
+mdae_lm3.final <- mdae(stream.test, lm.predicted.3)
+print(mdae_lm3.final)
+
+```
+
+### Lasso Regression fitting and testing
+
+```{r}
+
+#Now will exclude streams from the dataset and predicted values from linear regression
+
+test.n2 <- test.n %>% select(-streams)
+
+#I'll scale test features
+
+xtest.n2.scaled <- scale(test.n2)
+
+#fit the model using the best lambda in lasso
+
+lasso.model <- glmnet(xtest.n2.scaled, stream.test, alpha=1, lambda=best.lasso.lambda)
+ coef(lasso.model)
+
+#Predict streams in test set
+
+ytest.lasso.pred <- predict(lasso.model, newx = xtest.n2.scaled, penalty = best.lasso.lambda)
+
+
+#Checking MdAE
+mdae_lasso.final <- mdae(stream.test, ytest.lasso.pred)
+print(mdae_lasso.final)
+
+```
+
+### Random Forest fitting and testing
+
+```{r}
+
+#First I need to bring back class.decile for the test set
+
+test.n2$class.decile <- test$class.decile
+test.n2$class.decile <- as.factor(test.n2$class.decile)
+test.class <- test.n2$class.decile
+
+```
+
+Will first check model 1 (mtry=31 and trees=275)
+
+```{r}
+#fit the model 1
+
+rf1 <- rand_forest(mtry=31, trees=275) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+
+rf_fit1 <- rf1 %>%
+  fit(class.decile ~ ., data = test.n2)
+
+#Predict on the test set using first parameters:
+
+test_pred1 <-  rf_fit1 %>%
+  predict(test.n2) %>%
+  bind_cols(test.n2) %>%
+  select(class.decile, .pred_class)
+
+test_pred1 %>%
+    my_metrics(truth = class.decile, estimate = .pred_class)
+
+#Transforming to numeric to be able to calculate mdae
+
+rf1.pred <- test_pred1$.pred_class
+rf1.pred <- as.numeric(rf1.pred)
+test.class.n <- as.numeric(test.class)
+
+#Let's see the consufion matrix
+confusion_matrix1 <- table(test.class.n, rf1.pred)
+confusion_matrix1
+
+#Median Absolute Error
+
+mdae_rf1.final <- mdae(test.class.n, rf1.pred)
+print(mdae_rf1.final)
+
+```
+
+It is important to mention that Median Absolute Error is not the ideal metric for Random Forest performance, it is more common using Accuracy, F1 Score, Precision, ROC AUC, Recall, etc. MdAE is more appropiate for regression type of method (instead of classification), however if I need to use the same metric for all methods, MdAE is feasible.
+
+Now model 2 (mtry=10 and trees=300)
+
+```{r}
+#fit the model 2
+
+rf2 <- rand_forest(mtry=10, trees=300) %>%
+  set_engine("ranger") %>%
+  set_mode("classification")
+
+
+rf_fit2 <- rf2 %>%
+  fit(class.decile ~ ., data = test.n2)
+
+#Predict on the test set using first parameters:
+
+test_pred2 <-  rf_fit2 %>%
+  predict(test.n2) %>%
+  bind_cols(test.n2) %>%
+  select(class.decile, .pred_class)
+
+test_pred2 %>%
+    my_metrics(truth = class.decile, estimate = .pred_class)
+
+rf2.pred2 <- test_pred2$.pred_class
+rf2.pred2 <- as.numeric(rf2.pred2)
+test.class.n2 <- as.numeric(test.class)
+
+#Let's see the consufion matrix
+confusion_matrix2 <- table(test.class.n, rf2.pred2)
+confusion_matrix2
+
+#Median Absolute Error
+
+mdae_rf2.final <- mdae(test.class.n, rf2.pred2)
+print(mdae_rf2.final)
+
+
+```
+
+# Section 6 - Compare models
+
+Compare and evaluate the models in terms of overfitting vs underfitting, bias vs variance tradeoff, flexibility vs interpretability.
+
+Here a summary of the Median Absolute Errors for each model:
+
+```{r}
+
+# Example objects
+MdAE_Linear_Regression_Model_1 <- c(135968120)
+MdAE_Linear_Regression_Model_3 <- c(123474556)
+MdAE_Lasso <- c(113643028)
+MdAE_RF_1 <- c(0)
+MdAE_RF_2 <- c(0)
+
+
+# Create a data frame
+models.table <- data.frame("MdAE Linear Regression Model1" = MdAE_Linear_Regression_Model_1, "MdAE Linear Regression Model3" = MdAE_Linear_Regression_Model_3, "MdAE Lasso" = MdAE_Lasso, "MdAE RF1" = MdAE_RF_1, "MdAE RF2" = MdAE_RF_2)
+
+# Print the data frame with kable
+print(models.table)
+
+```
+
+The first thing to note here is that the absolute error in the hundred millions seems high to me, overall the variables in the different models while explain a good proportion of the number of streams the performance doesn's seems the best to me.
+
+The above statement seems not applying to the Random Forest method which has a zero error but this could mean a overfitting, even trying different hyperparameters it ended in almost zero error. Perhaps when classifying the number streams in 10 categories based on deciles of the distribution facilitate the prediction. Still it does sound like a overfitting.
+
+Then linear regression and lasso a more balanced model, with a more "reasonable" error iwhile high, and offers better interpretability by simplifying the model.
+
+Then among linear and lasso regression, seems that Linear Model 3 offer a good model in terms of simplicity and performance compared to linear model 1 (lower error and less predictors).
+
+Lasso seems to offers a lot more interpretability without being too much underfitting. This model uses only 3 main variables and have the lowest Median Absolute Error (besides Random Forest). However even though doesn't seems underfitting too much (by judging for the MdAE), it can be too simple so maybe it can imply biased model.
+
+# Section 7 - Ethical implications
+
+In the case of this model and what I have been trying to do which is predict number of songs streams, and based on the features collected in this dataset (nothing seems too personal in te data collected), I don't see a big ethical risks here.
+
+However, as all the marketing research analysis, at the end, it may result on manipulation of the user to generate more engagement in the platform which at the end is probably the end goal of music streaming platforms: more engagement for the users to spend more time in the platform.
