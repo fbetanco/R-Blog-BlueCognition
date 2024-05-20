@@ -7,7 +7,6 @@ categories: [spotify, machine learning, regression, classification]
 
 ![](spotify.jpg)
 
-
 # Section 1 - Motivation
 
 As an avid music listener in general, I have always been curious about the impact of streaming platforms on the music industry in terms of how it has been changing the way people consume, distribute, and monetize music.
