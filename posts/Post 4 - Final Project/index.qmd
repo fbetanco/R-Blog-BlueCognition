@@ -1,0 +1,696 @@
+---
+title: "Network Analysis on subreddit r/politics"
+subtitle: "Social Network Analysis"
+author: "Felix Betancourt"
+date: "May 16, 2024"
+format: 
+  html:
+    toc: true
+    toc-depth: 2
+    toc-title: Contents
+    toc-location: left
+    code-fold: false
+    html-math-method: katex
+    theme: flatly
+    smooth-scroll: true
+    link-external-icon: true
+    link-external-newwindow: true
+    citations-hover: true
+    footnotes-hover: true
+    font-size: 80%
+editor: visual
+image: "net_image_post.jpg"
+---
+
+![](net_image_post.jpg)
+
+## Network Analysis on subreddit r/politics
+
+### Introduction
+
+Social media, including Reddit, serves as a prominent platform for discourse and community engagement. The "Politics" subreddit (r/politics) is a hub for discussions on political matters, attracting users who share news articles and express opinions (Bail, 2016).
+
+In recent years, Reddit discussions have intensified, especially regarding U.S. politics, notably around Joe Biden and Donald Trump. Analyzing user interactions in r/politics offers insight into digital political landscapes (Conover et al., 2013).
+
+This research aims to explore Reddit users' connections within r/politics, focusing on Biden and Trump discussions. We seek to uncover community formation patterns and influencers through social network analysis. Specifically, we'll examine users' connectivity, community emergence, and the relationship between post popularity and user influence.
+
+By addressing these questions, we contribute to understanding political discourse on Reddit and social media's role in shaping public opinion.
+
+### Research Question
+
+1.  How are Reddit users connected in the "Politics" subreddit (r/politics), particularly when it comes to topics related to Biden and Trump?
+
+2.  Are there different communities (networks) for Biden and Trump?
+
+3.  How are these group of users connected based on the sentiment of their comments?
+
+4.  Is there a relationship between Score (net value between upvotes and downvotes) for a post, and how the user is connected to other users?
+
+### Hypothesis
+
+This research is mainly exploratory, I am not expecting something in particular, so I don't have an specific hypothesis, except for the research question number 4.
+
+In relation to the fourth research question I can expect that:
+
+H1: an user's higher score should be highly related to a higher centrality in the network.
+
+### Data
+
+```{r message = FALSE}
+suppressWarnings({
+suppressPackageStartupMessages(library(tidytext))
+suppressPackageStartupMessages(library(dplyr))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(quanteda))
+suppressPackageStartupMessages(library(quanteda.textplots))
+suppressPackageStartupMessages(library(janitor))
+suppressPackageStartupMessages(library(RCurl))
+suppressPackageStartupMessages(library(data.table))
+})
+
+```
+
+#### Data Wrangling
+
+1.  I scraped data from the Politics subreddit (r/politics) on April 2nd 2024 using R (RedditExtractoR package) and saved the objects generated from the scrapping to csv files
+
+2.  This subreddit has 8.5 million users, so the data can be very extensive, however the package used here (RedditExtractoR) pulled the last 1000 post.
+
+```{r}
+getwd()
+# Read large CSV file using fread
+politik1 <- fread("politics_comments1.csv")
+politik2 <- fread("politics_comments2.csv")
+politik3 <- fread("politics_comments3.csv")
+
+#Checking the structure of the data sets
+glimpse(politik1)
+glimpse(politik2)
+glimpse(politik3)
+
+```
+
+As we can see the the information in object "politik1" is redundant with the information in "politik2" so I won't use "politik1" at all. "Politik2" contain information about the title of the post, author, and some numeric information like up/down votes, number of replies to the post. "politik3" contain detailed comments on each post and the hierarchical sequence of comments to each post.
+
+For the purpose of this research we will define the users or authors to posts and comments as the nodes, and edges are defined as comments made in the same post; it does mean that the network will be undirected as I will consider only authors commenting in the same post but I won't capture the direction of the comment (B is commenting to A post).
+
+Let's do some data wrangling first:
+
+```{r}
+
+# Cleaning and wrangling
+
+politik_df <- politik2 %>% select(-V1, -timestamp) #eliminating non-relevant columns
+politik_df <- as_tibble(politik_df)
+politik_df$date <- as.Date(politik_df$date, format = "%m/%d/%Y")
+
+
+politik_df2 <- politik3 %>% select(-V1, -timestamp) #eliminating non-relevant columns
+politik_df2 <- as_tibble(politik_df2)
+politik_df2$date <- as.Date(politik_df2$date, format = "%m/%d/%Y")
+
+
+```
+
+Looking at the comments from user "Automoderator", it is like a Reddit moderator bot reminding rules of the forum, so I'll delete the rows belonging to AutoModerator". Also there are few commments where the author was "deleted".
+
+```{r}
+
+politik_df2 <- politik_df2[-(which(politik_df2$author %in% "AutoModerator")),]
+politik_df3 <- politik_df2[-(which(politik_df2$author %in% "[deleted]")),]
+
+```
+
+Let's see how many nodes (authors/users) we got in this data set:
+
+```{r}
+
+#first I created a count column
+politik_df3 <- politik_df3 %>% mutate(countid = "1")
+politik_df3$countid <- as.numeric(politik_df3$countid)
+
+#How many authors (nodes) we have here?
+length(unique(politik_df3$author))
+
+```
+
+In the data set there are about +31k users/authors (nodes), which is way too much nodes for the purpose of my research, so I'll select a sample of posts to analyze.
+
+I'll select the top 1% posts with more comments.
+
+```{r}
+#first let's see the distribution of number of comments
+percentiles <- quantile(politik_df$comments, probs = c(0.25, 0.50, 0.75, 0.90, 0.95, 0.99))
+print(percentiles)
+
+```
+
+Let's subset the data set with the top 1% posts in terms of comments and let's see how many posts we have.
+
+```{r}
+
+subset_politik2 <- subset(politik_df, comments >= 1439 )
+glimpse(subset_politik2)
+
+length(unique(subset_politik2$author))
+
+```
+
+We got a data set with 10 original posts and 10 authors, this is now a more "reasonable" data frame to analyze.
+
+Now I need to identify these post into the "politik_df3" data set which contain all the hierarchical comments network.
+
+```{r}
+
+subset_politik3 <- politik_df3 %>%
+         filter(url %in% subset_politik2$url)
+
+#let's see the df now 
+glimpse(subset_politik3)
+
+```
+
+```{r}
+#how many nodes (authors)?
+length(unique(subset_politik3$author))
+```
+
+We got 982 posts but still +3.8k nodes, it is still high number of nodes.
+
+I'll need a different approach.
+
+I'll select 2 specific posts with a "median" number of comments. One post will be about Trump and another about Biden, specifically I will filter posts by containing the word "Biden" and "Trump" in the title of the post.
+
+```{r}
+suppressWarnings({
+#First selecting posts with "Trump" or "Biden" included in the title of the post
+
+#Filtering the titles that contain Trump
+trump_df <- politik_df %>% filter(grepl("Trump", title))
+trump_df$candidate <- "Trump"
+
+#Let's check the distribution of number of comments
+percentiles_trump <- quantile(trump_df$comments, probs = c(0.25, 0.50, 0.75, 0.90, 0.95, 0.99))
+print(percentiles_trump)
+
+})
+
+```
+
+The median comment for Trump's post is 74 comments.Therefore I'll select the post with 74 comments.
+
+```{r}
+
+#Trump
+trump_post <- subset(trump_df, comments == 74 )
+
+```
+
+Now let's select Biden's post
+
+```{r}
+suppressWarnings({
+#Filtering the titles that contain Biden
+biden_df <- politik_df %>% filter(grepl("Biden", title))
+biden_df$candidate <- "Biden"
+
+#Let's check the distribution of number of comments
+percentiles_biden <- quantile(biden_df$comments, probs = c(0.25, 0.50, 0.75, 0.90, 0.95, 0.99))
+print(percentiles_biden)
+})
+```
+
+Median is 66.5 comments, let's use the post with 67 comments.
+
+```{r}
+
+#Biden
+biden_post <- subset(biden_df, comments == 67 )
+
+```
+
+Now I got the 2 main posts, let's explore a bit those 2 posts.
+
+```{r}
+
+#merging the previous df's
+trump_biden_df <- rbind(trump_post, biden_post)
+print(trump_biden_df$url)
+
+#let's identify these posts in the politik3 df (containing all the details)
+subset_politik3 <- politik_df3 %>%
+         filter(url %in% trump_biden_df$url)
+
+#creating a new column with the candidate related to the post
+subset_politik3 <- subset_politik3 %>%
+  mutate(candidate = case_when(
+    url == "https://www.reddit.com/r/politics/comments/1bsdho2/us_election_workers_face_thousands_of_threats_so/" ~ "Trump",
+    url == "https://www.reddit.com/r/politics/comments/1bsnq6l/are_black_and_brown_voters_really_fleeing_biden/" ~ "Biden",
+  ))
+
+#let's see the df now 
+glimpse(subset_politik3)
+
+# Let's keep only the relevant columns
+politik_final <- select(subset_politik3, c("url", "author", "score", "comment", "comment_id", "candidate"))
+
+# Extracting the levels of each comment and its hierarchy
+politik_final2 <- politik_final %>%
+  mutate(Level = str_count(comment_id, pattern = "_") + 1,  # Count underscores to determine depth
+         ParentID = ifelse(Level > 1, sapply(strsplit(comment_id, "_"), function(x) paste(x[-length(x)], collapse = "_")), NA))
+
+length(unique(politik_final2$author))
+length(unique(politik_final2$url))
+
+```
+
+Now we got 80 nodes (authors) from the 2 posts.
+
+#### Analysis
+
+Before proceeding with the network analysis, let's explore a bit about the authors (users).
+
+```{r}
+
+#let's create some tables to see frequencies and totals
+
+#first I created a count column
+politik_final2 <- politik_final2 %>% mutate(countid = "1")
+politik_final2$countid <- as.numeric(politik_final2$countid)
+
+#preparing tables
+library(data.table)
+politik_table2 <- data.table(politik_final2)
+
+#total posts grouped by author
+count_table2 <- politik_table2 %>% group_by(author) %>% summarise(Total_posts = sum(countid))
+count_table2 <- count_table2 %>% arrange(desc(Total_posts))
+print(count_table2)
+
+summary_votes <- politik_table2 %>% group_by(author) %>% summarize(Total_Score = sum(score))
+summary_votes <- summary_votes %>% arrange(desc(Total_Score))
+print(summary_votes)
+
+#Score as a proportion of comments
+summary_score_ratio <- politik_table2 %>% group_by(author) %>% summarize(Ratio_score_per_comment = sum(score)/sum(countid))
+summary_score_ratio <- summary_score_ratio %>% arrange(desc(Ratio_score_per_comment))
+print(summary_score_ratio)
+
+
+```
+
+I would expect that nodes (users) with higher score and/or higher score per comment should be predominant (central) in the network.
+
+For instance we got the following users in the top 5 in terms of score: "r-m-russell", "AngusMcTibbins", "OverlyComplexPants", "BrtFrkwr" and "betterwoke".
+
+On the other hand here the top 5 users with highest score per comment: "r-m-russell", "OverlyComplexPants", "AngusMcTibbins", "penis_berry_crunch", and "YeaterdaysQuim".
+
+Now I am ready to work on this data set for the Network analysis.
+
+```{r}
+#Rename level column as it represent more how deep/far is the comment
+#from the initial post, we will use this later as an attribute
+politik_final2 <- politik_final2 %>%
+  rename(distance = Level)
+
+#identify who is commenting on the same post
+politik_final2 <- politik_final2 %>%
+  mutate(level = substr(comment_id, 1, 2))
+
+politik_final2$level <- str_replace_all(politik_final2$level, "_", "")
+
+politik_final2 <- politik_final2 %>%
+  mutate(level2 = substr(candidate, 1, 1))
+
+politik_final2$comment_id2 <- paste(politik_final2$level2, politik_final2$level, sep = "_")
+
+#Now I'll create a new object by keeping only the columns I need
+
+politik_final3 <- select(politik_final2, c(-"comment_id", -"ParentID", -"level", -"level2"))
+
+
+#Will create a attribute only object to use later
+politik_attributes <- select(politik_final3, c("score", "candidate", "distance"))
+
+```
+
+I'll prepare the adjacency matrix:
+
+```{r message=FALSE}
+
+politik_m <- select(politik_final3, c("comment_id2", "author"))
+
+# Identify unique names and codes
+unique_names <- unique(politik_final3$author)
+unique_codes <- unique(politik_final3$comment_id2)
+
+# Create an empty adjacency matrix
+adj_matrix <- matrix(0, nrow = length(unique_names), ncol = length(unique_names),
+                     dimnames = list(unique_names, unique_names))
+
+#Populate the adjacency matrix based on shared codes
+for (i in 1:length(unique_names)) {
+  for (j in 1:length(unique_names)) {
+    # Check if names i and j have the same code
+    shared_code <- intersect(politik_final3$comment_id2[politik_final3$author == unique_names[i]],
+                             politik_final3$comment_id2[politik_final3$author == unique_names[j]])
+    if (length(shared_code) > 0) {
+      adj_matrix[unique_names[i], unique_names[j]] <- 1  # Set relationship to 1
+    }
+  }
+}
+
+# I'll eliminate loops in advance
+diag(adj_matrix) <- 0
+
+```
+
+##### Network Analysis
+
+Now let's explore the Network.
+
+It is important to mention that in this research we will assume an undirected network. We are only considering comments within the same post, not specific "direction" of each comment among users.
+
+```{r message = FALSE}
+
+#load packages
+suppressPackageStartupMessages(library(network))
+library(sna)
+library(statnet)
+
+politik.n <- network(adj_matrix, directed = FALSE)
+politik.n
+
+```
+
+We got 80 nodes and 316 edges.
+
+Let's explore the network. I'll calculate the census for Dyads and triads:
+
+```{r}
+#Dyads and Triads census
+sna::dyad.census(politik.n)
+sum(sna::triad.census(politik.n))
+sna::triad.census(politik.n)
+
+
+```
+
+In terms of Dyads, we got 158 mutual connections and 3002 null connections.
+
+In terms of Triads, we got 82160 triads in total: about 70k null triads, 11k open triads (one connection exist), 179 where 2 connections exist, and 337 closed triads.
+
+It seems a disperse network, but let's see Transitivity and Density:
+
+Let's check the Transitivity coefficient
+
+```{r}
+#transitivity
+gtrans(politik.n, mode="graph")
+
+```
+
+The transitivity coefficient is 0.85 which indicates a high level of cohesion.
+
+Let's see the density:
+
+```{r}
+
+# get network density: statnet
+network::network.density(politik.n) #already exclude loops
+
+```
+
+This density of 0.05 indicates a relatively sparse network with few connections between nodes.
+
+This combination of high transitivity and low density might suggests the presence of strong community structure in the network, where nodes are densely connected within their respective communities but sparsely connected between communities.
+
+Let's visualize the network
+
+```{r}
+# Plot the network
+plot(politik.n, displaylabels = TRUE, label.cex=0.7, vertex.cex=1.5, displayisolates=T, main = "Authors Network")
+
+```
+
+Without isolated nodes and labels
+
+```{r}
+
+# Plot the network
+plot(politik.n, displaylabels = F, label.cex=0.7, vertex.cex=1.5, displayisolates=F, main = "Authors Network")
+
+```
+
+Let's now include the Candidate as attribute. We will clasify the users as per their comments to Biden or Trump posts.
+
+```{r}
+
+#I'll create a column with Biden true-false attribute
+politik_final3at <- politik_final3 %>%
+  mutate(
+    biden = if_else(candidate == "Biden", "TRUE", "FALSE")
+  )
+
+#now let's see how authonrs in Biden and Trump are interacting
+nodeColors<-ifelse(politik_final3at$biden,"dodgerblue","red")
+plot(politik.n,displaylabels=F,vertex.col=nodeColors,vertex.cex=1.2, displayisolates=T, main = "Authors Network by Candidate") #including isolated nodes
+legend("bottomright", legend = c("Biden", "Trump"), col = c("dodgerblue", "red"), pch = c(21, 21), title = "Node Type")
+```
+
+Let's exclude isolated nodes
+
+```{r}
+plot(politik.n,displaylabels=F,vertex.col=nodeColors,vertex.cex=1.2, displayisolates=F, main = "Authors Network by Candidate (excluding isolated nodes)") #excluding isolated nodes
+legend("bottomright", legend = c("Biden", "Trump"), col = c("dodgerblue", "red"), pch = c(21, 21), title = "Node Type")
+```
+
+It looks like there are closed communities not connected among them. Which is consistent with the Transitivity vs Density finding before.
+
+In particular Biden's commentors tend to be together and Trump's commentors seems more disperse.
+
+Let's see who are the authors with highest degree centrality
+
+```{r}
+
+# create a dataset of vertex names and degree: statnet
+politik.nodes.df <- data.frame(name = politik.n %v% "vertex.names",
+                            degree = sna::degree(politik.n))
+
+politik_table7 <- data.table(politik.nodes.df)
+
+#order by centrality degree
+politik_table7 %>% arrange(desc(degree)) %>%
+slice(1:10)
+summary(politik_table7)
+
+```
+
+Let's explore the correlation between centrality degree and score (remember it is the net value between upvotes and downvotes).
+
+I am expecting a significant positive relationship between soore and degree centrality.
+
+```{r}
+suppressPackageStartupMessages(library(igraph))
+
+# Create the igraph object
+politik.ig <- graph_from_adjacency_matrix(adj_matrix, mode = "undirected")  # Undirected by default
+
+# Calculate degree centrality for each node
+degree_centrality <- degree(politik.ig, mode = "all")
+
+# If nodes do not have names, you can use node IDs
+if (is.null(V(politik.ig)$name)) {
+  V(politik.ig)$name <- as.character(1:vcount(politik.ig))
+}
+
+# Check node names
+node_names <- V(politik.ig)$name
+
+# Create a sample data frame with some values for each node
+# Ensure the data frame has the same node identifiers as the graph
+df <- data.frame(
+  author = node_names,  # Node names or IDs
+  value = runif(vcount(politik.ig), 1, 100)  # Random values between 1 and 100
+)
+
+# Convert degree centrality to a data frame
+degree_centrality_df <- data.frame(
+  author = node_names,  # Node names or IDs
+  degree_centrality = degree_centrality  # Degree centrality values
+)
+
+# Merge the degree centrality data frame with the existing data frame
+merged_df <- merge(df, degree_centrality_df, by = "author", all = TRUE)
+merged_df2 <- merge(merged_df, politik_final2, by = "author", all = TRUE)
+degree_scoredf <- select(merged_df2, c("degree_centrality", "score"))
+
+# Calculate the correlation coefficient between 'score' and 'degree_centrality'
+cor_matrix1 <- cor(degree_scoredf, use = "complete.obs")
+cor_matrix1
+
+
+```
+
+Seems that the relationship between score and degree centrality is very low (0.002).
+
+So I can't accept my hypothesis.
+
+I am curious about the top 5 users with higher degree centrality.
+
+```{r}
+
+degree_scoredf3 <- select(merged_df2, c("degree_centrality", "author"))
+subset_df <- distinct(degree_scoredf3, author, .keep_all = TRUE)
+
+subset_df %>% arrange(desc(degree_centrality))
+```
+
+Users with higher degree centrality are "Knoxcore", "NoDesinformatziya", "BrtFrkwr", "TheRandomInteger", and "Bulky-You-5657"
+
+Out of these 5 nodes only one of them ("BrtFrkwr") is also in the top 5 related to score. So it is consistent with the low correlation between score and centrality.
+
+Let's now check what clusters (communities) we do have in this network.
+
+```{r}
+
+# run clustering algorithm: fast_greedy
+politik.fg <- igraph::cluster_fast_greedy(politik.ig)
+# inspect clustering object
+politik.fg
+igraph::groups(politik.fg)
+
+```
+
+There are 2 main clusters in the network.
+
+Let's see the density of each cluster using block model function.
+
+```{r}
+
+print(blockmodel(politik.n, politik.fg$membership)$block.model,
+      digits = 2)
+
+```
+
+The blocks 1 and 2 in our network seems dense.
+
+```{r}
+df_comm <- data.frame(
+  Node = V(politik.ig)$name,
+  Community = politik.fg$membership,
+  Degree = degree_centrality
+)
+
+# 4. Find maximum degree for each community
+
+highest_degree_nodes <- df_comm %>%
+  group_by(Community) %>%
+  filter(Degree == max(Degree)) %>%
+  ungroup()
+
+highest_degree_nodes %>% arrange(-desc(Community))
+```
+
+Let's now visualize the communities including the nodes with highest degree centrality for the main communities (1 and 2):
+
+```{r, fig.width=11, fig.height=7}
+# Identify nodes with high degree centrality (e.g., top 3)
+top_nodes <- names(sort(degree_centrality, decreasing = TRUE))[1:5]
+
+# Create a custom labeling vector
+node_labels <- rep(NA, vcount(politik.ig))
+# Set the labels for the nodes with high degree centrality
+node_labels[top_nodes] <- top_nodes
+
+# Identify isolated nodes
+isolated_nodes <- which(degree(politik.ig) == 0)
+
+# Remove isolated nodes from the network
+network_no_isolated <- delete_vertices(politik.ig, isolated_nodes)
+
+plot(network_no_isolated,
+     vertex.label = node_labels,  
+     vertex.label.cex = 0.8,
+     vertex.color = membership(politik.fg),
+     vertex.label.color = "black",
+     vertex.shape = "sphere",
+     layout = layout_with_fr,
+     main = "Communities without isolated nodes and labeling top 5 central nodes")
+```
+
+It looks like while we have 2 main communities the nodes with highest degree centrality are mostly in one of the communities.
+
+It seems like that group of authors are close among them and at the same time are central in the network.
+
+##### Sentiment Analysis and the Network
+
+Lastly let's add a new attribute to the network using text analysis, in particular sentiment analysis.
+
+Let's get the sentiment for each author's comments.
+
+```{r}
+library(sentimentr)
+
+#labeling based on the sentiment score
+comments <- politik_final3$comment
+get_sentiment_label <- function(ave_sentiment) {
+  if (ave_sentiment > 0.1) {
+    return("Positive")
+  } else if (ave_sentiment < -0.1) {
+    return("Negative")
+  } else {
+    return("Neutral")
+  }
+}
+sentiment_scores <- sentiment_by(x = comments, text.var = comments)
+
+#adding the label for each author in the data set
+politik_final3$sentiment <- sapply(sentiment_scores$ave_sentiment, get_sentiment_label)
+
+
+```
+
+Now let's visualize the network by sentiment of each node.
+
+```{r}
+# Create a graph object from the data frame
+g <- graph_from_data_frame(politik.n, directed = FALSE)
+
+# Add node attributes to the graph
+V(g)$sentiment <- politik_final3$sentiment[match(V(g)$name, politik_final3$author)]
+
+
+# Define color palette for categories
+color_palette <- c("Negative" = "red", "Neutral" = "blue", "Positive" = "lightgreen")
+
+# Visualize the network with colored nodes
+plot(g, vertex.color = color_palette[V(g)$sentiment], layout = layout_nicely, vertex.label = NA, vertex.size = 7, isolates=TRUE, main = "Authors Network by Sentiment")
+legend("bottomright", legend = c("Positive", "Neutral", "Negative"), col = c("lightgreen", "blue", "red"), pch = c(21, 21), title = "Node Sentiment")
+
+```
+
+From this chart it looks like:
+
+1.  Most of the sentiments are either neutral or negative
+2.  Sentiments tend to get closer, or group among them.
+
+### Conclusion
+
+1.  The network was found to be sparse (low density) but highly interconnected within subgroups (high transitivity), suggesting the presence of distinct communities.
+
+2.  The visualization of the network confirmed the presence of communities, showing separate clusters of users commenting on Biden and Trump posts. The network was divided into 37 distinct clusters, indicating multiple smaller communities within the larger Biden and Trump-focused groups.
+
+3.  The hypothesis that users with higher scores (more upvotes or higher score) would also have more central positions in the network was not supported. The correlation between score and centrality was negligible.
+
+4.  While score wasn't a strong indicator of influence, degree centrality (number of connections) was used to identify the most connected users. These users may play important roles in shaping discussions within their respective communities.
+
+5.  In terms of the sentiment analysis it seems that most comments were neutral or negative. And, users with similar sentiments tended to interact with each other.
+
+This Network Analysis research offers interesting insights into the social dynamics of a politically charged online community. It highlights the presence of distinct communities, the complex interplay between user engagement (score) and influence (centrality), and the opportunity for further exploration of the factors shaping political discourse on platforms like Reddit.
+
+### References
+
+Bail C. A. (2016). Combining natural language processing and network analysis to examine how advocacy organizations stimulate conversation on social media. Proceedings of the National Academy of Sciences of the United States of America, 113(42), 11823--11828. https://doi.org/10.1073/pnas.1607151113
+
+Conover, M., Ratkiewicz, J., Francisco, M., Goncalves, B., Menczer, F., & Flammini, A. (2021). Political Polarization on Twitter. Proceedings of the International AAAI Conference on Web and Social Media, 5(1), 89-96. https://doi.org/10.1609/icwsm.v5i1.14126
